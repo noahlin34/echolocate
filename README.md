@@ -1,4 +1,4 @@
-#🐬 echolocate
+# 🐬 echolocate
 
 **echolocate** is a high‑performance CLI OSINT tool for checking username availability across popular sites. It’s fast, concurrent, and built for clean terminal UX with a live progress TUI.
 
