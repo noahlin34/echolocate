@@ -61,22 +61,24 @@ type doneMsg struct{}
 type quitMsg struct{}
 
 type progressModel struct {
-	total   int
-	current int
-	bar     progress.Model
-	ready   chan struct{}
+	total    int
+	current  int
+	bar      progress.Model
+	ready    chan struct{}
+	username string
 }
 
-func newProgressModel(total int, ready chan struct{}) progressModel {
+func newProgressModel(total int, ready chan struct{}, username string) progressModel {
 	bar := progress.New(
-		progress.WithDefaultGradient(),
+		progress.WithGradient("#60A5FA", "#FBBF24"),
 		progress.WithWidth(40),
 		progress.WithoutPercentage(),
 	)
 	return progressModel{
-		total: total,
-		bar:   bar,
-		ready: ready,
+		total:    total,
+		bar:      bar,
+		ready:    ready,
+		username: username,
 	}
 }
 
@@ -119,13 +121,30 @@ func (m progressModel) View() string {
 	if m.total == 0 {
 		return "No sites loaded."
 	}
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Render("echolocate")
-	stats := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render(fmt.Sprintf("%d/%d", m.current, m.total))
-	line := lipgloss.NewStyle().Foreground(lipgloss.Color("#22D3EE")).Render("Scanning profiles")
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#0F172A", Dark: "#E2E8F0"}).Render("echolocate")
+	tagline := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#475569", Dark: "#94A3B8"}).Render("quietly mapping the social web")
+	stats := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#64748B", Dark: "#94A3B8"}).Render(fmt.Sprintf("%d/%d", m.current, m.total))
+	target := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#0EA5E9", Dark: "#60A5FA"}).Render(m.username)
+	line := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#334155", Dark: "#CBD5F5"}).Render("Scanning profiles for")
+
+	header := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.AdaptiveColor{Light: "#E5E7EB", Dark: "#334155"}).
+		Padding(0, 1).
+		Render(fmt.Sprintf("%s  %s\n%s\n%s %s", title, stats, tagline, line, target))
+
+	barView := m.bar.View()
 	if m.current >= m.total {
-		return fmt.Sprintf("%s  %s\n%s\n%s\n", title, stats, line, m.bar.ViewAs(1))
+		barView = m.bar.ViewAs(1)
 	}
-	return fmt.Sprintf("%s  %s\n%s\n%s\n", title, stats, line, m.bar.View())
+
+	barLine := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.AdaptiveColor{Light: "#E5E7EB", Dark: "#334155"}).
+		Padding(0, 1).
+		Render(barView)
+
+	return fmt.Sprintf("%s\n%s\n", header, barLine)
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
@@ -166,7 +185,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	useTUI := term.IsTerminal(int(os.Stdout.Fd()))
 	if useTUI {
 		ready := make(chan struct{})
-		prog = tea.NewProgram(newProgressModel(len(sites), ready))
+		prog = tea.NewProgram(newProgressModel(len(sites), ready, username))
 		progErr = make(chan error, 1)
 		go func() {
 			_, err := prog.Run()
@@ -247,12 +266,12 @@ func checkSite(client *http.Client, site model.Site, username string, timeout ti
 	status, err := doRequest(client, urlStr, timeout)
 	if err != nil {
 		log.Printf("%s: %v", site.Name, err)
-		return model.Result{SiteName: site.Name, URL: urlStr, Exists: false, Status: 0}
+		return model.Result{SiteName: site.Name, URL: urlStr, Exists: false, Status: 0, Color: site.Color}
 	}
 
 	if status >= 500 {
 		log.Printf("%s: upstream error %d", site.Name, status)
-		return model.Result{SiteName: site.Name, URL: urlStr, Exists: false, Status: status}
+		return model.Result{SiteName: site.Name, URL: urlStr, Exists: false, Status: status, Color: site.Color}
 	}
 
 	successCodes := site.SuccessCodes
@@ -268,7 +287,7 @@ func checkSite(client *http.Client, site model.Site, username string, timeout ti
 		}
 	}
 
-	return model.Result{SiteName: site.Name, URL: urlStr, Exists: exists, Status: status}
+	return model.Result{SiteName: site.Name, URL: urlStr, Exists: exists, Status: status, Color: site.Color}
 }
 
 func doRequest(client *http.Client, urlStr string, timeout time.Duration) (int, error) {
@@ -392,16 +411,21 @@ func renderResults(results []model.Result) string {
 		return "No results."
 	}
 
-	headStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0EA5E9"))
+	headStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#0EA5E9", Dark: "#7DD3FC"})
 	cellStyle := lipgloss.NewStyle()
-	takenStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#22C55E"))
-	availStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F97316"))
-	unknownStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#94A3B8"))
+	takenStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#16A34A", Dark: "#4ADE80"})
+	availStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#F59E0B", Dark: "#FBBF24"})
+	unknownStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#CBD5F5"})
 
 	headers := []string{"Site", "URL", "Status"}
 	rows := make([][]string, 0, len(results))
 	for _, res := range results {
-		rows = append(rows, []string{res.SiteName, res.URL, statusLabel(res, takenStyle, availStyle, unknownStyle)})
+		siteStyle := cellStyle
+		if res.Color != "" {
+			siteStyle = siteStyle.Foreground(lipgloss.Color(res.Color))
+		}
+		siteName := siteStyle.Render(res.SiteName)
+		rows = append(rows, []string{siteName, res.URL, statusLabel(res, takenStyle, availStyle, unknownStyle)})
 	}
 
 	widths := make([]int, len(headers))
@@ -437,7 +461,7 @@ func renderResults(results []model.Result) string {
 	}
 
 	var b strings.Builder
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED")).Render("Results")
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#0F172A", Dark: "#E2E8F0"}).Render("Results")
 	b.WriteString(title)
 	b.WriteString("\n")
 	b.WriteString(formatRow(headers, widths, headStyle))
@@ -446,13 +470,13 @@ func renderResults(results []model.Result) string {
 		b.WriteString(formatRow(row, widths, cellStyle))
 		b.WriteString("\n")
 	}
-	summary := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748B")).Render(
+	summary := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#94A3B8"}).Render(
 		fmt.Sprintf("Taken: %d  Available: %d  Unknown: %d", takenCount, availCount, unknownCount),
 	)
 	b.WriteString(summary)
 	b.WriteString("\n")
 	if len(unknownSites) > 0 {
-		notice := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(
+		notice := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#F59E0B", Dark: "#FBBF24"}).Render(
 			"Unknown/blocked sites to consider replacing: " + strings.Join(unknownSites, ", "),
 		)
 		b.WriteString(notice)

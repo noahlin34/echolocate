@@ -3,36 +3,42 @@
     "name": "GitHub",
     "url_template": "https://github.com/{username}",
     "category": "dev",
+    "color": "#60A5FA",
     "success_status": [200]
   },
   {
     "name": "Twitter",
     "url_template": "https://x.com/{username}",
     "category": "social",
+    "color": "#7DD3FC",
     "success_status": [200]
   },
   {
     "name": "Reddit",
     "url_template": "https://www.reddit.com/user/{username}",
     "category": "social",
+    "color": "#FDBA74",
     "success_status": [200]
   },
   {
     "name": "Instagram",
     "url_template": "https://www.instagram.com/{username}/",
     "category": "social",
+    "color": "#F472B6",
     "success_status": [200]
   },
   {
     "name": "Medium",
     "url_template": "https://medium.com/@{username}",
     "category": "blog",
+    "color": "#34D399",
     "success_status": [200]
   },
   {
     "name": "YouTube",
     "url_template": "https://www.youtube.com/@{username}",
     "category": "video",
+    "color": "#F87171",
     "success_status": [200]
   }
 ]
