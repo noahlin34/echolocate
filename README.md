@@ -4,8 +4,9 @@
 
 ---
 
-![echolocateDemo](https://github.com/user-attachments/assets/d7abcd28-963d-4f6c-98c8-36aea8e74b11)
+<p align="center" > <img src=https://github.com/user-attachments/assets/d7abcd28-963d-4f6c-98c8-36aea8e74b11/> </p>
 
+---
 
 ## ✨ Highlights
 
