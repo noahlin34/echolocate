@@ -1,11 +1,14 @@
 package model
 
 type Site struct {
-	Name         string `json:"name"`
-	URLTemplate  string `json:"url_template"`
-	Category     string `json:"category"`
-	Color        string `json:"color"`
-	SuccessCodes []int  `json:"success_status"`
+	Name           string   `json:"name"`
+	URLTemplate    string   `json:"url_template"`
+	Category       string   `json:"category"`
+	Color          string   `json:"color"`
+	SuccessCodes   []int    `json:"success_status"`
+	NotFoundCodes  []int    `json:"not_found_status"`
+	NotFoundRegex  []string `json:"not_found_regex"`
+	RequestMethod string   `json:"request_method"`
 }
 
 type Result struct {

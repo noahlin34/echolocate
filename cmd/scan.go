@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,7 @@ import (
 
 const defaultWorkers = 20
 const defaultTimeout = 5 * time.Second
+const maxBodyBytes = 64 * 1024
 
 var (
 	flagTimeout int
@@ -263,7 +266,12 @@ func checkSite(client *http.Client, site model.Site, username string, timeout ti
 	urlStr := strings.ReplaceAll(site.URLTemplate, "{u}", username)
 	urlStr = strings.ReplaceAll(urlStr, "{username}", username)
 
-	status, err := doRequest(client, urlStr, timeout)
+	method := http.MethodHead
+	if strings.EqualFold(site.RequestMethod, http.MethodGet) {
+		method = http.MethodGet
+	}
+
+	status, body, err := doRequest(client, method, urlStr, timeout, method == http.MethodGet && len(site.NotFoundRegex) > 0)
 	if err != nil {
 		log.Printf("%s: %v", site.Name, err)
 		return model.Result{SiteName: site.Name, URL: urlStr, Exists: false, Status: 0, Color: site.Color}
@@ -274,68 +282,90 @@ func checkSite(client *http.Client, site model.Site, username string, timeout ti
 		return model.Result{SiteName: site.Name, URL: urlStr, Exists: false, Status: status, Color: site.Color}
 	}
 
+	if method == http.MethodHead && len(site.NotFoundRegex) > 0 {
+		status, body, err = doRequest(client, http.MethodGet, urlStr, timeout, true)
+		if err != nil {
+			log.Printf("%s: %v", site.Name, err)
+			return model.Result{SiteName: site.Name, URL: urlStr, Exists: false, Status: 0, Color: site.Color}
+		}
+		if status >= 500 {
+			log.Printf("%s: upstream error %d", site.Name, status)
+			return model.Result{SiteName: site.Name, URL: urlStr, Exists: false, Status: status, Color: site.Color}
+		}
+	}
+
 	successCodes := site.SuccessCodes
 	if len(successCodes) == 0 {
 		successCodes = []int{http.StatusOK}
 	}
 
-	exists := false
-	for _, code := range successCodes {
-		if status == code {
-			exists = true
-			break
-		}
+	exists := statusIn(successCodes, status)
+
+	if statusIn(site.NotFoundCodes, status) || matchesNotFound(body, site.NotFoundRegex) {
+		exists = false
 	}
 
 	return model.Result{SiteName: site.Name, URL: urlStr, Exists: exists, Status: status, Color: site.Color}
 }
 
-func doRequest(client *http.Client, urlStr string, timeout time.Duration) (int, error) {
+func doRequest(client *http.Client, method, urlStr string, timeout time.Duration, readBody bool) (int, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, urlStr, nil)
+	req, err := http.NewRequestWithContext(ctx, method, urlStr, nil)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	addHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
 		if isTimeout(err) {
-			return 0, fmt.Errorf("timeout")
+			return 0, "", fmt.Errorf("timeout")
 		}
-		return 0, err
+		return 0, "", err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusMethodNotAllowed {
-		return doGet(client, urlStr, timeout)
+	if method == http.MethodHead && resp.StatusCode == http.StatusMethodNotAllowed {
+		return doRequest(client, http.MethodGet, urlStr, timeout, readBody)
 	}
 
-	return resp.StatusCode, nil
+	body := ""
+	if readBody {
+		limited := io.LimitReader(resp.Body, maxBodyBytes)
+		if data, readErr := io.ReadAll(limited); readErr == nil {
+			body = string(data)
+		}
+	}
+
+	return resp.StatusCode, body, nil
 }
 
-func doGet(client *http.Client, urlStr string, timeout time.Duration) (int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
-	if err != nil {
-		return 0, err
-	}
-	addHeaders(req)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		if isTimeout(err) {
-			return 0, fmt.Errorf("timeout")
+func statusIn(codes []int, status int) bool {
+	for _, code := range codes {
+		if status == code {
+			return true
 		}
-		return 0, err
 	}
-	defer resp.Body.Close()
+	return false
+}
 
-	return resp.StatusCode, nil
+func matchesNotFound(body string, patterns []string) bool {
+	if body == "" || len(patterns) == 0 {
+		return false
+	}
+	for _, pattern := range patterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			log.Printf("invalid not_found_regex %q: %v", pattern, err)
+			continue
+		}
+		if re.MatchString(body) {
+			return true
+		}
+	}
+	return false
 }
 
 func addHeaders(req *http.Request) {
@@ -413,8 +443,8 @@ func renderResults(results []model.Result) string {
 
 	headStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#0EA5E9", Dark: "#7DD3FC"})
 	cellStyle := lipgloss.NewStyle()
-	takenStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#16A34A", Dark: "#4ADE80"})
-	availStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#F59E0B", Dark: "#FBBF24"})
+	takenStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#DC2626", Dark: "#F87171"})
+	availStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#16A34A", Dark: "#4ADE80"})
 	unknownStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#CBD5F5"})
 
 	headers := []string{"Site", "URL", "Status"}
@@ -448,7 +478,7 @@ func renderResults(results []model.Result) string {
 	)
 
 	for _, res := range results {
-		if res.Status == 0 || res.Status >= 500 {
+		if isUnknownStatus(res.Status) {
 			unknownCount++
 			unknownSites = append(unknownSites, res.SiteName)
 			continue
@@ -501,8 +531,20 @@ func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-lipgloss.Width(s))
 }
 
+func isUnknownStatus(status int) bool {
+	if status == 0 || status >= 500 {
+		return true
+	}
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return true
+	default:
+		return false
+	}
+}
+
 func statusLabel(res model.Result, takenStyle, availStyle, unknownStyle lipgloss.Style) string {
-	if res.Status == 0 || res.Status >= 500 {
+	if isUnknownStatus(res.Status) {
 		return unknownStyle.Render("Unknown")
 	}
 	if res.Exists {

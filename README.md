@@ -73,7 +73,7 @@ Results are shown as **Taken / Available / Unknown**.
 
 - **Taken**: a matching success status code (typically 200)
 - **Available**: site responds but doesn’t match success criteria
-- **Unknown**: timeout or 5xx (site blocked / down / rate‑limited)
+- **Unknown**: timeout, 5xx, or blocked/rate‑limited responses (401/403/429)
 
 You can export the full result set:
 
@@ -101,13 +101,18 @@ Each site supports a **custom color** for display in the results table:
   "url_template": "https://github.com/{username}",
   "category": "dev",
   "color": "#60A5FA",
-  "success_status": [200]
+  "success_status": [200],
+  "not_found_status": [404]
 }
 ```
 
 **Notes:**
 - Use `{username}` (or `{u}`) as the placeholder in `url_template`.
 - If a site repeatedly shows **Unknown**, it’s often blocking bot traffic. Consider replacing it.
+- Optional fields:
+  - `not_found_status`: status codes that indicate the username is available.
+  - `not_found_regex`: regex patterns that detect "not found" pages when the status is 200.
+  - `request_method`: set to `"GET"` when `HEAD` is unreliable.
 
 ---
 
